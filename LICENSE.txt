@@ -1,0 +1,41 @@
+SAI RIP Tester — Source-Available License
+
+Copyright (c) 2026 ColorJet Group. All rights reserved.
+
+This repository publishes the SOURCE of the SAI RIP Tester front-end
+(rip_tester.py and the accompanying launch/config files) openly, for transparency
+and for use with ColorJet printing systems. It is source-available, NOT open source:
+the source may be read and run, but the rights granted below are limited.
+
+1. WHAT YOU MAY DO
+   You may, at no charge:
+     (a) view, study, and run the front-end source in this repository;
+     (b) modify it locally for your own use with ColorJet printing systems;
+     (c) configure it (e.g. updateconfig.json) to point at your own endpoints.
+
+2. WHAT YOU MAY NOT DO
+   Without the prior written permission of ColorJet Group, you may not:
+     (a) redistribute this source, modified or unmodified, in whole or in part;
+     (b) publish, host, or mirror it elsewhere;
+     (c) sell, sublicense, or offer it as part of any product or service;
+     (d) use it, in whole or in part, to build, train, or assist a product that
+         competes with ColorJet products;
+     (e) remove or alter any copyright, licence, or attribution notice.
+
+3. PROPRIETARY COMPONENTS (SEPARATE)
+   The SAI RIP engine, SAI Studio, the updater binary (sai_update.exe), and any
+   other compiled components are the proprietary and confidential property of
+   ColorJet Group. They are NOT covered by this licence, no source for them is
+   provided or implied, and you may not reverse engineer, decompile, or
+   disassemble them. Their use may require a valid licence key issued by ColorJet
+   Group and is governed by any separate written agreement, which prevails in the
+   event of conflict.
+
+4. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A PARTICULAR
+   PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL COLORJET GROUP BE LIABLE FOR
+   ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR IN CONNECTION WITH THE
+   SOFTWARE OR ITS USE.
+
+For permissions beyond this licence, contact ColorJet Group.
