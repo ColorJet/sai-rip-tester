@@ -54,8 +54,8 @@ def _pick(*cands):
 # at a build elsewhere without editing this file -- no machine-specific paths are
 # baked into the source. (A Release/ subdir is checked before a bare bin/ so a fresh
 # build wins over a stale one.)
-DEFAULT_ENGINE = _pick(os.path.join(_BASE, "bin", "sai_process_image.exe"),
-                       os.path.join(_BASE, "bin", "Release", "sai_process_image.exe"),
+DEFAULT_ENGINE = _pick(os.path.join(_BASE, "bin", "Release", "sai_process_image.exe"),
+                       os.path.join(_BASE, "bin", "sai_process_image.exe"),
                        os.environ.get("SAI_ENGINE", ""))
 DEFAULT_STUDIO = _pick(os.path.join(_BASE, "SAI_Studio", "SAI_Studio.exe"),
                        os.environ.get("SAI_STUDIO", ""))
@@ -91,7 +91,7 @@ def save_settings(d: dict):
 # ---- self-update ------------------------------------------------------------
 # Bumped at each release (matches the installer's AppVersion). Compared against
 # `version` in the update manifest.
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 # No update host is baked into this source -- it ships in updateconfig.json beside the
 # install (or the SAI_UPDATE_URL env var), so this script carries no infrastructure and
@@ -219,6 +219,60 @@ def first_existing(*paths):
     return paths[0] if paths else ""
 
 
+# ---- GPU / driver report ------------------------------------------------------
+# The engine ships its own CUDA runtime (bin\cudart64_<N>.dll) but the DRIVER comes
+# from the PC. A driver older than that runtime fails on the very first CUDA call,
+# which the engine reports as a GPU allocation error -- the single most common
+# field report so far (2026-11: driver 560 / CUDA 12.6 against a CUDA 13 engine).
+# Say so at startup, before anyone blames the licence or the profile.
+
+def engine_cuda_major(engine_exe):
+    """Major CUDA version of the runtime shipped beside the engine (0 = unknown)."""
+    import glob, re
+    d = os.path.dirname(engine_exe or "")
+    for p in glob.glob(os.path.join(d, "cudart64_*.dll")) if d else []:
+        m = re.search(r"cudart64_(\d+)", os.path.basename(p))
+        if m:
+            return int(m.group(1))
+    return 0
+
+
+def gpu_report(engine_exe):
+    """Run nvidia-smi; return (log_lines, warning_or_None)."""
+    import re
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    need = engine_cuda_major(engine_exe)
+    try:
+        q = subprocess.run(["nvidia-smi", "--query-gpu=name,driver_version,memory.total,memory.used",
+                            "--format=csv,noheader"], capture_output=True, text=True,
+                           timeout=15, creationflags=flags).stdout
+        head = subprocess.run(["nvidia-smi"], capture_output=True, text=True,
+                              timeout=15, creationflags=flags).stdout
+    except Exception as e:
+        warn = ("nvidia-smi is not available (%s).\n\nNo NVIDIA driver was found. The RIP engine needs an "
+                "NVIDIA GPU with a current driver (CUDA %s or newer)." % (e.__class__.__name__, need or "13"))
+        return ["[gpu] nvidia-smi not found - no NVIDIA driver? The engine cannot run without one.\n"], warn
+    lines = []
+    for l in q.splitlines():
+        if l.strip():
+            lines.append("[gpu] %s\n" % l.strip())
+    m = re.search(r"CUDA Version:\s*([0-9]+(?:\.[0-9]+)?)", head)
+    have = m.group(1) if m else "unknown"
+    lines.append("[gpu] driver supports CUDA %s; engine runtime is CUDA %s\n" % (have, need or "unknown"))
+    warn = None
+    try:
+        if need and m and int(float(have)) < need:
+            warn = ("The NVIDIA driver on this PC supports CUDA %s, but the RIP engine was built for "
+                    "CUDA %d.\n\nEvery RIP will fail with a GPU allocation / 'CUDA driver version is "
+                    "insufficient' error until the driver is updated.\n\nInstall the latest NVIDIA driver "
+                    "(580 series or newer), reboot, and relaunch this tester." % (have, need))
+            lines.append("[gpu] WARNING: driver too old for the engine runtime - update the NVIDIA driver "
+                         "to 580+ before testing. RIPs will fail until then.\n")
+    except ValueError:
+        pass
+    return lines, warn
+
+
 class Tester(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -251,8 +305,20 @@ class Tester(tk.Tk):
         self._restore_values()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(80, self._drain_log)
+        self.after(300, self._gpu_report)                              # driver vs engine CUDA check
         self.after(1500, lambda: self._check_updates(silent=True))   # quiet check on launch
         self.after(2200, lambda: send_telemetry("heartbeat"))        # support heartbeat (opt-out honored)
+
+    def _gpu_report(self):
+        """Log GPU, driver and CUDA versions; warn once if the driver predates the engine."""
+        def work():
+            lines, warn = gpu_report(self.v_engine.get().strip())
+            self.log_q.put("[tester] v%s\n" % APP_VERSION)
+            for l in lines:
+                self.log_q.put(l)
+            if warn:
+                self.after(0, lambda: messagebox.showwarning("NVIDIA driver too old", warn))
+        threading.Thread(target=work, daemon=True).start()
 
     # ------------------------------------------------------------------ helpers
     def _row(self, parent, r, label):
@@ -448,6 +514,12 @@ class Tester(tk.Tk):
         h2 = ttk.Frame(hf); h2.pack(fill="x", padx=4, pady=2)
         ttk.Checkbutton(h2, text="--drop-sizes (use the profile's real level coverages)",
                         variable=self.v_dropsizes).pack(side="left")
+        # The profile states nominal volumes (7/17/27). A real head may deliver
+        # 6-8 / 16-18 / 25-30, and the largest matters most because coverage is a ratio
+        # to it. Blank = use the profile's numbers.
+        ttk.Label(h2, text="volumes pl:").pack(side="left", padx=(10, 2))
+        self.v_dropvols = tk.StringVar()
+        ttk.Entry(h2, textvariable=self.v_dropvols, width=10).pack(side="left")
         ttk.Checkbutton(h2, text="--dither-adaptive", variable=self.v_dadaptive).pack(side="left", padx=(16, 2))
         ttk.Label(h2, text="detail threshold").pack(side="left", padx=(6, 2))
         ttk.Entry(h2, textvariable=self.v_dthreshold, width=5).pack(side="left")
@@ -476,10 +548,27 @@ class Tester(tk.Tk):
         ttk.Checkbutton(ff, text="--preview (soft proof)", variable=self.v_preview).pack(side="left", padx=10)
         ttk.Checkbutton(ff, text="--cmyk-test (4ch math, ignores profile)", variable=self.v_cmyk).pack(side="left")
         self.v_inkctl = tk.BooleanVar(); self.v_rasterok = tk.BooleanVar()
+        self.v_inklimit = tk.BooleanVar()
         ff2 = ttk.Frame(t); ff2.grid(row=r + 1, column=0, columnspan=4, sticky="w", padx=6)
         ttk.Checkbutton(ff2, text="--ink-control (apply the profile's density curve)",
                         variable=self.v_inkctl).pack(side="left")
-        ttk.Checkbutton(ff2, text="--allow-raster-mismatch (force a 1-bit profile - output WILL be wrong)",
+        # The profile states a total ink limit; without this it is only printed. On a
+        # correctly built device link it should barely fire -- the log says how often.
+        ttk.Checkbutton(ff2, text="--enforce-ink-limit (clamp to the profile's TAC)",
+                        variable=self.v_inklimit).pack(side="left", padx=10)
+        # Blank = use the profile's own limit. A number overrides it and implies
+        # enforcement -- handy for trialling a tighter limit for cost or bleeding.
+        ttk.Label(ff2, text="override %:").pack(side="left", padx=(12, 2))
+        self.v_inklimit_pct = tk.StringVar()
+        ttk.Entry(ff2, textvariable=self.v_inklimit_pct, width=6).pack(side="left")
+
+        ff3 = ttk.Frame(t); ff3.grid(row=r + 2, column=0, columnspan=4, sticky="w", padx=6)
+        # Post-linearisation runs by default because the profile was built assuming it
+        # does; this is the escape hatch for comparing against the old behaviour.
+        self.v_nopl = tk.BooleanVar()
+        ttk.Checkbutton(ff3, text="--no-pl-lut (skip the profile's post-linearisation)",
+                        variable=self.v_nopl).pack(side="left")
+        ttk.Checkbutton(ff3, text="--allow-raster-mismatch (force a 1-bit profile - output WILL be wrong)",
                         variable=self.v_rasterok).pack(side="left", padx=10)
         r += 1
         # output / printer
@@ -611,9 +700,15 @@ class Tester(tk.Tk):
         def work():
             try:
                 exe = download_installer(_resolve_installer_url(latest), latest.get("sha256", ""), prog)
-                subprocess.Popen([exe, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
+                # The install is silent, so leave a trail: an Inno Setup log in %TEMP%.
+                # "Nothing happened" reports are otherwise impossible to diagnose.
+                logf = os.path.join(tempfile.gettempdir(), "sai_rip_tester_update.log")
+                subprocess.Popen([exe, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=" + logf])
                 self.after(0, lambda: (messagebox.showinfo("Updating",
-                    "The installer is launching. This app will now close to apply the update."),
+                    "The installer is running silently in the background (about a minute).\n"
+                    "This app will now close; relaunch it afterwards and check Help > Version.\n\n"
+                    "If the version did not change, a UAC prompt may have been dismissed. "
+                    "The install log is at:\n" + logf),
                     self.destroy(), os._exit(0)))
             except Exception as e:
                 self.after(0, lambda: (win.destroy(), messagebox.showerror("Update failed", str(e))))
@@ -746,6 +841,9 @@ class Tester(tk.Tk):
                 argv += ["--dither-threshold", thr]
         if self.v_dropsizes.get():
             argv.append("--drop-sizes")
+            vols = self.v_dropvols.get().strip()
+            if vols:
+                argv.append(vols)      # measured volumes override the profile nominals
         if self.v_edge.get():
             argv.append("--edge-aware")
             for flag, var, default in (("--edge-threshold", self.v_edge_thr, "24"),
@@ -756,6 +854,13 @@ class Tester(tk.Tk):
                     argv += [flag, v]
         if self.v_inkctl.get():
             argv.append("--ink-control")
+        pct = self.v_inklimit_pct.get().strip()
+        if pct:
+            argv += ["--ink-limit", pct]      # implies enforcement engine-side
+        elif self.v_inklimit.get():
+            argv.append("--enforce-ink-limit")
+        if self.v_nopl.get():
+            argv.append("--no-pl-lut")
         if self.v_rasterok.get():
             argv.append("--allow-raster-mismatch")
         if self.v_debug.get():

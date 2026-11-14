@@ -2,6 +2,27 @@
 
 Customer-facing release notes for SAI RIP Tester.
 
+## 1.3.1 — 2026-11-14
+
+Fix release. No new colour or halftone behaviour.
+
+- **Solid ink printed as blank.** Fixed a packing fault in 2-bit output that could
+  leave fully covered areas empty on the printer.
+- **Ink limit enforced.** The profile's total-ink limit is now applied, not only
+  reported. A new tester option (`--enforce-ink-limit`) controls it, with an
+  override percentage.
+- **Post-linearisation applied.** The profile's linearisation curve is now used
+  during output; `--no-pl-lut` in the tester turns it off for comparison prints.
+- **Drop volumes.** Real head drop volumes can be entered when a profile only states
+  nominal values.
+- **Driver check at startup.** The tester now logs the GPU, driver and CUDA version
+  and warns when the NVIDIA driver is older than the engine needs (CUDA 13, driver
+  580 or newer). This was the cause of every "GPU allocation error" reported so far.
+- **Visible updates.** The in-app update writes an install log to `%TEMP%` and
+  tells you where it is.
+- **Test checklist.** A fill-in test form ships in `docs\TEST_CHECKLIST.md`
+  (Start menu: Test Checklist).
+
 ## 1.3.0 — 2026-07-29
 
 Print-quality release.
